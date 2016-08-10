@@ -1,18 +1,19 @@
 import argparse
 import csv, os, time
-import MySQLdb  # http://sourceforge.net/projects/mysql-python/
+import psycopg2  # psycopg2 v2.5.1
 import result
 from result import Result
 import gspread, getpass # https://pypi.python.org/pypi/gspread/ (v0.1.0)
+import sys
 
 # Get command line arguments
 parser = argparse.ArgumentParser(description='Load SNP and locus data')
 parser.add_argument('--dev', action='store_true', help='Only load chromosome 21 for development testing')
 parser.add_argument('--path', help='Path to chromosome data')
-parser.add_argument('--db', type=str, help='MySQL database name')
-parser.add_argument('--yhost', type=str, help='MySQL host')
-parser.add_argument('--username', type=str, help='MySQL username')
-parser.add_argument('--password', type=str, help='MySQL password')
+parser.add_argument('--db', type=str, help='Postgres database name')
+parser.add_argument('--yhost', type=str, help='Postgres host')
+parser.add_argument('--username', type=str, help='Postgres username')
+parser.add_argument('--password', type=str, help='Postgres password')
 parser.add_argument('--tag', type=str, help='Tag to place in results file')
 parser.add_argument('--remote', action='store_true', help='Enable remote reporting')
 parser.add_argument('--rkey', help='Google document key')
@@ -49,13 +50,13 @@ else:
     
 if args.path is not None: # If set, use as root path for chromosome data
     path = args.path
-if args.db is not None: # If set, use as database name for MySQL
+if args.db is not None: # If set, use as database name for Postgres
     databaseName = args.db
-if args.username is not None: # MySQL username
+if args.username is not None: # Postgres username
     username = args.username
-if args.password is not None: # MySQL password
+if args.password is not None: # Postgres password
     password = args.password
-if args.yhost is not None: # MySQL host name
+if args.yhost is not None: # Postgres host name
     sqlHost = args.yhost
 if args.tag is not None: # Tag to place in results file
     tag = args.tag
@@ -67,7 +68,7 @@ if args.queries is not None:
     runQueries = args.queries
     
 # Open results file
-resultsFileName = 'results-mysql'
+resultsFileName = 'results-postgres'
 if resultsFileName != "":
     resultsFileName += '-' + tag
 resultsFileName += '.txt'
@@ -105,44 +106,42 @@ if dev is False:
                 startList.append(cur)
         chromosomes = startList
 
-# Create MySQL database, tables if not exists
-mysqlConnection = MySQLdb.connect(host=sqlHost,user=username,passwd=password)
-createDbCursor = mysqlConnection.cursor()
+# Create Postgres database, tables if not exists
+postgresConnection = psycopg2.connect("dbname=" + username + " user=" + username)
+postgresConnection.autocommit = True
+createDbCursor = postgresConnection.cursor()
+createDbCursor.execute("DROP DATABASE " + databaseName)
+createDbCursor.execute("CREATE DATABASE " + databaseName)
+createDbCursor.close()
+postgresConnection.close() # Reconnect with database name
 
-createDbCursor.execute("CREATE DATABASE IF NOT EXISTS " + databaseName + " DEFAULT CHARACTER SET 'utf8'".format(databaseName))
-mysqlConnection.commit()
-mysqlConnection.close() # Reconnect with database name
-mysqlConnection = MySQLdb.connect(host=sqlHost,user=username,passwd=password,db=databaseName)
-createDbCursor = mysqlConnection.cursor()
+postgresConnection = psycopg2.connect("dbname=" + databaseName + " user=" + username)
+createDbCursor = postgresConnection.cursor()
 
 TABLES = {}
 TABLES['snp'] = (
-    "CREATE TABLE IF NOT EXISTS `snp`("
-    "  `id` int(11) NOT NULL AUTO_INCREMENT,"
-    "  `rsid` varchar(45) NOT NULL,"
-    "  `chr` varchar(5) NOT NULL,"
-    "  `has_sig` binary(1) NOT NULL,"
-    "  PRIMARY KEY (`id`)"
-    ") ENGINE=InnoDB AUTO_INCREMENT=862719 DEFAULT CHARSET=utf8;")
+    "CREATE TABLE IF NOT EXISTS snp ("
+    "  id serial PRIMARY KEY,"
+    "  rsid varchar,"
+    "  chr varchar,"
+    "  has_sig boolean"
+    ");")
 TABLES['locus'] = (
-    "CREATE TABLE IF NOT EXISTS `locus`("
-    "  `id` int(11) NOT NULL AUTO_INCREMENT,"
-    "  `mrna_acc` varchar(45) NOT NULL,"
-    "  `gene` varchar(45) NOT NULL,"
-    "  `class` varchar(45) NOT NULL,"
-    "  `snp_id` int(11) NOT NULL,"
-    "  PRIMARY KEY (`id`),"
-    "  CONSTRAINT `idx_snp` FOREIGN KEY (`snp_id`) REFERENCES `snp` (`id`) ON DELETE NO ACTION ON UPDATE NO ACTION"
-    ") ENGINE=InnoDB AUTO_INCREMENT=7564 DEFAULT CHARSET=utf8;")
+    "CREATE TABLE IF NOT EXISTS locus("
+    "  id serial PRIMARY KEY,"
+    "  mrna_acc varchar,"
+    "  gene varchar,"
+    "  class varchar,"
+    "  snp_id integer,"
+    "  CONSTRAINT idx_snp FOREIGN KEY (snp_id) REFERENCES snp (id) ON DELETE NO ACTION ON UPDATE NO ACTION"
+    ");")
 
 for name, ddl in TABLES.iteritems():
     createDbCursor.execute(ddl)
-    mysqlConnection.commit()
+    postgresConnection.commit()
 
-createDbCursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-createDbCursor.execute("SET UNIQUE_CHECKS = 0;")
-createDbCursor.execute("SET SESSION tx_isolation='READ-UNCOMMITTED'")
-createDbCursor.execute("SET sql_log_bin = 0;")
+createDbCursor.execute("ALTER TABLE snp DISABLE trigger ALL;")
+createDbCursor.execute("ALTER TABLE locus DISABLE trigger ALL;")
 
 createDbCursor.close()
 
@@ -154,7 +153,7 @@ rsidList = {}      # Dictionary of RSIDs that will also hold the
 
 for curChr in chromosomes:
     result = Result()
-    result.method = "MySQL"
+    result.method = "pgsql"
     result.tag = tag    
     print "Chromosome " + str(curChr)
     result.chromosome = str(curChr)
@@ -174,7 +173,8 @@ for curChr in chromosomes:
 
     print "Chromosome " + str(curChr) + ". Reading SNP Data"
     result.snpLoadStart = time.time()
-    
+    sys.stdout.flush()
+
     # Read in data from SNP file
     with open(curSnpFilePath,'r') as csvfile:
         data = csv.reader(csvfile,delimiter='\t')
@@ -184,32 +184,33 @@ for curChr in chromosomes:
                 if row[2] != '' and row[2] != 'false':
                     hasSig = True
                 rsidList[row[0]] = 0
-                insStr = "INSERT INTO snp (rsid, chr, has_sig) VALUES (\"{0}\", \"{1}\", {2})".format(row[0], row[1], hasSig)
+                insStr = "INSERT INTO snp (rsid, chr, has_sig) VALUES ('{0}', '{1}', {2}) RETURNING id".format(row[0], row[1], hasSig)
                 snpInserts[row[0]] = insStr
     
     # Data for reporting
     result.snpLoadEnd = time.time()
     result.totalSnps = len(snpInserts)
            
-    # Insert SNP data into MySQL
-    mysqlCursor = mysqlConnection.cursor()
+    # Insert SNP data into postgres
+    createDbCursor = postgresConnection.cursor()
 
     print "Chromosome " + str(curChr) + ". Inserting SNP Data."
+    sys.stdout.flush()
 
     # Log current run start time
     result.snpInsertStart = time.time()
     
     # For each snp, insert record and then grab primary key
     for rsid,snp in snpInserts.iteritems():
-        mysqlCursor.execute(snp)
-        rsidList[rsid] = mysqlCursor.lastrowid
+        createDbCursor.execute(snp)
+        rsidList[rsid] = createDbCursor.fetchone()[0]
         
-    # Commit all inserts to MySQL and grab end time
-    mysqlConnection.commit()
+    # Commit all inserts to pgsql and grab end time
+    postgresConnection.commit()
     
-    # Log completed time, close MySQL cursor
+    # Log completed time, close pgsql cursor
     result.snpInsertEnd=time.time()
-    mysqlCursor.close()
+    createDbCursor.close()
 
     # Clear list of SNPs to free up memory
     snpInserts.clear()
@@ -222,17 +223,17 @@ for curChr in chromosomes:
         data = csv.reader(csvfile,delimiter='\t')
         for row in data:
             if(len(row) == 4):
-                # Load loci in MySQL statements
+                # Load loci in pgsql statements
                 if row[0] in rsidList and rsidList[row[0]] > 0: # If RSID value is present, load with PK
-                    insStr = "INSERT INTO locus (mrna_acc, gene, class, snp_id) VALUES (\"{0}\", \"{1}\", \"{2}\", {3})".format(row[1], row[2], row[3], rsidList[row[0]])
+                    insStr = "INSERT INTO locus (mrna_acc, gene, class, snp_id) VALUES ('{0}', '{1}', '{2}', {3})".format(row[1], row[2], row[3], rsidList[row[0]])
                     lociInserts.append(insStr)
                 
     # Data for reporting
     result.lociLoadEnd = time.time()
     result.totalLoci = len(lociInserts)
     
-    # Create new cursor, enter loci data into MySQL
-    cursor = mysqlConnection.cursor()
+    # Create new cursor, enter loci data into pgsql
+    cursor = postgresConnection.cursor()
 
     print "Chromosome " + str(curChr) + ". Inserting loci data."
 
@@ -243,17 +244,19 @@ for curChr in chromosomes:
     for locus in lociInserts:
         cursor.execute(locus)
     
-    # Commit data to MySQL
-    mysqlConnection.commit()
+    # Commit data to pgsql
+    postgresConnection.commit()
     
-    # Log end time and total MySQL time
+    # Log end time and total pgsql time
     result.lociInsertEnd = time.time()
     
-    # Close MySQL cursor
+    # Close pgsql cursor
     cursor.close()
     
     print result.toTerm()
     resultsFile.write(result.toString() + '\n')
+    sys.stdout.flush()
+
     if remote:
         try:
             print "Sending to GDocs..."
@@ -263,20 +266,20 @@ for curChr in chromosomes:
             print "Unable to send to GDocs, continuing..."
 
 # Create new cursor, create indexes and run test queries
-cursor = mysqlConnection.cursor()    
+cursor = postgresConnection.cursor()    
 
 print "Turning on key checks..."
-cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
-cursor.execute("SET UNIQUE_CHECKS = 1;")
+cursor.execute("ALTER TABLE snp ENABLE trigger ALL;")
+cursor.execute("ALTER TABLE locus ENABLE trigger ALL;")
 
 if createIndexes:
     result = Result()
-    result.method = "MySQL-Idx"
+    result.method = "pgsql-Idx"
     result.tag = tag
 
-    rsidIndex = "CREATE UNIQUE INDEX `idx_rsid` ON `snp` (`rsid`)"
-    clinIndex = "CREATE INDEX `idx_clin` ON `snp` (`has_sig`)"
-    geneIndex = "CREATE INDEX `idx_gene` ON `locus` (`gene`)"
+    rsidIndex = "CREATE UNIQUE INDEX idx_rsid ON snp (rsid)"
+    clinIndex = "CREATE INDEX idx_clin ON snp (has_sig)"
+    geneIndex = "CREATE INDEX idx_gene ON locus (gene)"
     
     print "Creating RSID index..."
     idxStart = time.time()
@@ -308,7 +311,7 @@ if createIndexes:
 if runQueries:
     for z in range(1,101):
         result = Result()
-        result.method = "MySQL-Qry" + str(z)
+        result.method = "pgsql-Qry" + str(z)
         result.tag = tag
         print "Running queries, count " + str(z)
     
@@ -341,10 +344,10 @@ if runQueries:
             except:
                 print "Unable to send to GDocs, continuing..."
 
-# Close MySQL cursor
+# Close pgsql cursor
 cursor.close()
 
 resultsFile.close()
 
-mysqlConnection.close()
+postgresConnection.close()
 print "Run complete."

@@ -41,7 +41,7 @@ class Result:
                          "Loci Load Start", "Loci Load End", "Loci Load Time",
                          "SNP Insert Start", "SNP Insert End", "SNP Insert Time", "Total SNPs",
                          "Loci Insert Start", "Loci Insert End", "Loci Insert Time", "Total Loci",
-                         "Total MySQL Time",
+                         "Total MySQL/pgsql Time",
                          "Document Insert Start", "Document Insert End", "Document Insert Time", "Total Documents",
                          "Idx-RSID", "Idx-ClinSig", "Idx-Gene", 
                          "Qry-RSID", "Qry-ClinSig", "Qry-Gene", "Qry-Gene/Sig"]
@@ -76,7 +76,7 @@ class Result:
                          "Loci Load Start", "Loci Load End", "Loci Load Time",
                          "SNP Insert Start", "SNP Insert End", "SNP Insert Time", "Total SNPs",
                          "Loci Insert Start", "Loci Insert End", "Loci Insert Time", "Total Loci",
-                         "Total MySQL Time",
+                         "Total MySQL/pgsql Time",
                          "Document Insert Start", "Document Insert End", "Document Insert Time", "Total Documents",
                          "Idx-RSID", "Idx-ClinSig", "Idx-Gene", 
                          "Qry-RSID", "Qry-ClinSig", "Qry-Gene", "Qry-Gene/Sig"])    
@@ -90,7 +90,7 @@ class Result:
                          "\t\tTotal SNPs: " + str(self.totalSnps),
                          "\tLoci Insert Time: " + str(self.lociInsertTime) + 's',
                          "\t\tTotal Loci: " + str(self.totalLoci),
-                         "\tMySQL Total Time: " + str(self.mysqlTotalTime) + 's',
+                         "\tMySQL/pgsql Total Time: " + str(self.mysqlTotalTime) + 's',
                          "\tDocument Insert Time: " + str(self.documentInsertTime) + 's',
                          "\t\tTotal Documents: " + str(self.totalDocuments)])
     
