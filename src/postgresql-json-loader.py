@@ -20,6 +20,7 @@ parser.add_argument('--tag', type=str, help='Tag to place in results file')
 parser.add_argument('--remote', action='store_true', help='Enable remote reporting')
 parser.add_argument('--rkey', help='Google document key')
 parser.add_argument('--start', type=str, help='Chromosome to start load from')
+parser.add_argument('--pgcopy', action='store_true', help='Load data from file with COPY method')
 parser.add_argument('--indexes', action='store_true', help='Create indexes')
 parser.add_argument('--queries', action='store_true', help='Run queries')
 args = parser.parse_args()
@@ -30,6 +31,7 @@ scriptVersion = "2.0"
 # Set default variables
 dev = False
 remote = False
+pgcopy = False
 createIndexes = False
 runQueries = False
 databaseName = 'snp_research'
@@ -66,6 +68,8 @@ if args.tag is not None: # Tag to place in results file
     tag = args.tag
 if args.start is not None:
     start = args.start
+if args.pgcopy is not None:
+    pgcopy = args.pgcopy
 if args.indexes is not None:
     createIndexes = args.indexes
 if args.queries is not None:
@@ -211,9 +215,28 @@ for curChr in chromosomes:
     # Log start time for MongoDB inserts
     result.documentInsertStart = time.time()
 
-    for v in documents.iteritems():
-        cursor.execute("insert into snp (jsondata) values (%s)", [json.dumps(v[1])])
+    if pgcopy:
+        mimpfile = "/home/ec2-user/jsonchr" + str(curChr) + ".json"
+        print "Writing json file for copy"
+        fp = open(mimpfile,'w')
+        for curDoc in documents.values():
+            json.dump(curDoc,fp)
+            fp.write('\n')
+        fp.close()
+        print "Loading json with copy method"
+        # Restart insert time
+        result.documentInsertStart = time.time()
+        
+        cursor.execute("COPY snp (jsondata) FROM '" + mimpfile + "'")
 
+        os.remove(mimpfile)
+    else:
+        print "Individual document inserting starting"
+        # Insert each document with SNP and loci data
+        for v in documents.iteritems():
+            cursor.execute("insert into snp (jsondata) values (%s)", [json.dumps(v[1])])
+
+    
     # Commit data to pgsql
     postgresConnection.commit()
     
