@@ -291,25 +291,28 @@ if createIndexes:
     result.method = "pgsql-Idx"
     result.tag = tag
 
-    rsidIndex = "CREATE INDEX idx_rsid ON snp USING GIN ((jsondata) jsonb_path_ops)"
-    #clinIndex = "CREATE INDEX idx_clin ON snp USING GIN ((jsondata -> 'has_sig'))"
-    #geneIndex = "CREATE INDEX idx_gene ON snp USING GIN ((jsondata -> 'loci') jsonb_path_ops)"
+    rsidIndex = "CREATE INDEX idx_rsid ON snp USING GIN ((jsondata -> 'rsid'))"
+    clinIndex = "CREATE INDEX idx_clin ON snp USING GIN ((jsondata -> 'has_sig'))"
+    geneIndex = "CREATE INDEX idx_gene ON snp USING GIN ((jsondata -> 'loci') jsonb_path_ops)"
     
     print "Creating RSID index..."
     idxStart = time.time()
     cursor.execute(rsidIndex)
+    cursor.commit()
     idxEnd = time.time()
     result.idxRsid = idxEnd - idxStart
     
     print "Creating ClinSig index..."
     idxStart = time.time()
     cursor.execute(clinIndex)
+    cursor.commit()
     idxEnd = time.time()
     result.idxClinSig = idxEnd - idxStart        
 
     print "Creating Gene index..."
     idxStart = time.time()
     cursor.execute(geneIndex)
+    cursor.commit()
     idxEnd = time.time()
     result.idxGene = idxEnd - idxStart
 
