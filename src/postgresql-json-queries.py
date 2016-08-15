@@ -77,12 +77,12 @@ for z in range(1,11):
         sys.stdout.flush()
 
         qryStart = time.time()
-        cursor.execute('SELECT COUNT(*) FROM (SELECT DISTINCT jsondata -> jsondata.rsid FROM snp WHERE jsondata @> \'{"loci.gene" : "' + g + '"}\')')
+        cursor.execute('SELECT COUNT(*) FROM (SELECT DISTINCT jsondata -> jsondata.rsid FROM snp WHERE jsondata->\'loci\' @> \'[{"gene" : "' + g + '"}]\')')
         qryEnd = time.time()
         result.qryByGene = qryEnd-qryStart        
     
         qryStart = time.time()
-        cursor.execute('SELECT COUNT(*) FROM (SELECT DISTINCT jsondata -> jsondata.rsid FROM snp WHERE jsondata @> \'{"has_sig":true, "loci.gene" : "' + g + '"}\')')
+        cursor.execute('SELECT COUNT(*) FROM (SELECT DISTINCT jsondata -> jsondata.rsid FROM snp WHERE jsondata->\'loci\' @> \'[{"gene" : "' + g + '"}]\' AND jsondata-> @> \'{"has_sig":true}\')')
         qryEnd = time.time()
         result.qryByGeneSig = qryEnd-qryStart     
 

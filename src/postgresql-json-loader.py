@@ -20,6 +20,7 @@ parser.add_argument('--tag', type=str, help='Tag to place in results file')
 parser.add_argument('--remote', action='store_true', help='Enable remote reporting')
 parser.add_argument('--rkey', help='Google document key')
 parser.add_argument('--start', type=str, help='Chromosome to start load from')
+parser.add_argument('--bulk', action='store_true', help='Load data from file with bulk/batch insert')
 parser.add_argument('--pgcopy', action='store_true', help='Load data from file with COPY method')
 parser.add_argument('--indexes', action='store_true', help='Create indexes')
 parser.add_argument('--queries', action='store_true', help='Run queries')
@@ -42,6 +43,7 @@ path = ''
 tag = ''
 docKey = ''
 start = '1'
+bulk = False
 jsonb = False
 # Update any present from CLI
 if args.dev: # If dev mode, only load chr 21
@@ -70,6 +72,8 @@ if args.start is not None:
     start = args.start
 if args.pgcopy is not None:
     pgcopy = args.pgcopy
+if args.bulk is not None:
+    bulk = args.bulk
 if args.indexes is not None:
     createIndexes = args.indexes
 if args.queries is not None:
@@ -214,6 +218,7 @@ for curChr in chromosomes:
 
     # Log start time for MongoDB inserts
     result.documentInsertStart = time.time()
+    batchSize = 10000
 
     if pgcopy:
         mimpfile = "/home/ec2-user/jsonchr" + str(curChr) + ".json"
@@ -230,6 +235,23 @@ for curChr in chromosomes:
         cursor.execute("COPY snp (jsondata) FROM '" + mimpfile + "'")
 
         os.remove(mimpfile)
+    elif bulk:
+        print "Bulk/batch document inserting starting"
+        curChromData = []
+        for key, value in documents.iteritems():
+            curChromData.append(value)
+
+        # Insert each document with SNP and loci data
+        jsonBatchData = []
+        for i in xrange(0,len(curChromData),batchSize):
+            for j in xrange(i, i+batchSize, 1):
+                if i + j < len(curChromData):
+                    jsonBatchData.append("('" + json.dumps(curChromData[i + j]) + "')")
+                else:
+                    break
+
+            arrData = ','.join(jsonBatchData)
+            cursor.execute("insert into snp (jsondata) values " + arrData)
     else:
         print "Individual document inserting starting"
         # Insert each document with SNP and loci data
@@ -269,9 +291,9 @@ if createIndexes:
     result.method = "pgsql-Idx"
     result.tag = tag
 
-    rsidIndex = "CREATE INDEX idx_rsid ON snp USING GIN ((jsondata -> 'rsid'))"
-    clinIndex = "CREATE INDEX idx_clin ON snp USING GIN ((jsondata -> 'has_sig'))"
-    geneIndex = "CREATE INDEX idx_gene ON snp USING GIN ((jsondata -> 'gene'))"
+    rsidIndex = "CREATE INDEX idx_rsid ON snp USING GIN ((jsondata) jsonb_path_ops)"
+    #clinIndex = "CREATE INDEX idx_clin ON snp USING GIN ((jsondata -> 'has_sig'))"
+    #geneIndex = "CREATE INDEX idx_gene ON snp USING GIN ((jsondata -> 'loci') jsonb_path_ops)"
     
     print "Creating RSID index..."
     idxStart = time.time()
@@ -319,12 +341,12 @@ if runQueries:
         result.qryByClinSig = idxEnd - idxStart
 
         idxStart = time.time()
-        cursor.execute('SELECT count(*) FROM (SELECT DISTINCT s.rsid FROM snp WHERE jsondata @> \'{"loci.gene":"GRIN2B"}\')')
+        cursor.execute('SELECT count(*) FROM snp WHERE jsondata->\'loci\' @> \'[{"gene":"GRIN2B"}]\'')
         idxEnd = time.time()
         result.qryByGene = idxEnd - idxStart
     
         idxStart = time.time()
-        cursor.execute('SELECT count(*) FROM (SELECT DISTINCT s.rsid FROM snp WHERE jsondata @> \'{"loci.gene":"GRIN2B", "has_sig":true}\')')
+        cursor.execute('SELECT count(*) FROM snp WHERE jsondata->\'loci\' @> \'[{"loci.gene":"GRIN2B"}]\' AND jsondata @> \'{"has_sig":true}\'')
         idxEnd = time.time()
         result.qryByGeneSig = idxEnd - idxStart        
 
