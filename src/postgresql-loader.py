@@ -271,6 +271,7 @@ cursor = postgresConnection.cursor()
 print "Turning on key checks..."
 cursor.execute("ALTER TABLE snp ENABLE trigger ALL;")
 cursor.execute("ALTER TABLE locus ENABLE trigger ALL;")
+cursor.execute("CREATE INDEX idx_snpid_fk ON locus (snp_id)")
 
 if createIndexes:
     result = Result()
