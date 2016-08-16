@@ -1,10 +1,11 @@
 import argparse
 import csv, os, time
 import psycopg2  # psycopg2 v2.5.1
-import result
-from result import Result
 import gspread, getpass # https://pypi.python.org/pypi/gspread/ (v0.1.0)
 import sys
+
+sys.path.append('../modules')
+from result import Result
 
 # Get command line arguments
 parser = argparse.ArgumentParser(description='Load SNP and locus data')
