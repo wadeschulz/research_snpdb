@@ -1,18 +1,26 @@
+#!/usr/bin/env python
 import argparse
 import csv, os, time
-from result import Result
-import gspread, getpass, json, os # https://pypi.python.org/pypi/gspread/ (v0.1.0)
 import psycopg2  # psycopg2 v2.5.1
 
+import sys
+sys.path.append('../modules')
+from result import Result
+
+__author__ = "Wade Schulz, Donn Felker, Brent Nelson"
+__credits__ = ["Wade Schulz", "Donn Felker", "Brent Nelson"]
+__license__ = "MIT"
+__version__ = "2.0.0"
+__maintainer__ = "Wade Schulz"
+__email__ = "wade.schulz@gmail.com"
+__status__ = "Research"
+
 # Get command line arguments
-parser = argparse.ArgumentParser(description='Run MongoDB queries')
-parser.add_argument('--db', type=str, help='MongoDB database name')
-parser.add_argument('--yhost', type=str, help='MongoDB host')
-parser.add_argument('--username', type=str, help='Postgres username')
-parser.add_argument('--password', type=str, help='Postgres password')
+parser = argparse.ArgumentParser(description='Run PostgreSQL queries')
+parser.add_argument('--db', type=str, help='PostgreSQL database name')
+parser.add_argument('--username', type=str, help='PostgreSQL username')
+parser.add_argument('--password', type=str, help='PostgreSQL password')
 parser.add_argument('--tag', type=str, help='Tag to place in results file')
-parser.add_argument('--remote', action='store_true', help='Enable remote reporting')
-parser.add_argument('--rkey', help='Google document key')
 
 args = parser.parse_args()
 
@@ -21,45 +29,26 @@ remote = False
 databaseName = 'snp_research'
 username = 'dev'
 password = ''
-sqlHost = '127.0.0.1'
-path = ''
 tag = ''
 
 # Update any present from CLI
-if args.remote and args.rkey is not None: # If set to remote log and document key is present, log to GDocs
-    remote = True
-    docKey = args.rkey
-else:
-    remote = False
-
 if args.db is not None: # If set, use as database name for Postgres
     databaseName = args.db
 if args.username is not None: # Postgres username
     username = args.username
 if args.password is not None: # Postgres password
     password = args.password
-if args.yhost is not None: # Postgres host name
-    sqlHost = args.yhost
 if args.tag is not None: # Tag to place in results file
     tag = args.tag
 
 # Open results file, print headers
-resultsFileName = 'results-postgres-singlequery'
+resultsFileName = 'qresults-pgsql'
 if resultsFileName != "":
     resultsFileName += '-' + tag
 resultsFileName += '.txt'
 resultsFile = open(resultsFileName, 'w')
 result = Result()
 resultsFile.write(result.toHeader() + '\n')
-
-if remote:
-    gusername = raw_input("Enter Google username: ")
-    gpassword = getpass.getpass("Enter Google password: ")    
-    gs = gspread.Client(auth=(gusername,gpassword))
-    gs.login()
-    ss = gs.open_by_key(docKey)
-    ws = ss.add_worksheet(tag + "-" + str(time.time()),1,1)
-    ws.append_row(result.headerArr())
 
 # Create pgsql connection
 postgresConnection = psycopg2.connect("dbname=" + databaseName + " user=" + username)
@@ -80,12 +69,5 @@ for z in range(1,11):
         result.qryByGene = qryEnd-qryStart        
     
         resultsFile.write(result.toString() + '\n')
-        if remote:
-            try:
-                print "Sending to GDocs..."
-                gs.login()
-                ws.append_row(result.stringArr()) 
-            except:
-                print "Unable to send to GDocs, continuing..."
 
 print "Run complete!"
