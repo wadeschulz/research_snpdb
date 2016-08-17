@@ -1,27 +1,22 @@
 import argparse
 import csv, os, time
 import psycopg2  # psycopg2 v2.5.1
-import result
-from result import Result
-import gspread, getpass # https://pypi.python.org/pypi/gspread/ (v0.1.0)
-import json
+
 import sys
+sys.path.append('../modules')
+from result import Result
 
 # Get command line arguments
 parser = argparse.ArgumentParser(description='Load SNP and locus data')
 parser.add_argument('--dev', action='store_true', help='Only load chromosome 21 for development testing')
-parser.add_argument('--path', help='Path to chromosome data')
 parser.add_argument('--db', type=str, help='Postgres database name')
-parser.add_argument('--yhost', type=str, help='Postgres host')
 parser.add_argument('--username', type=str, help='Postgres username')
 parser.add_argument('--password', type=str, help='Postgres password')
 parser.add_argument('--jsonb', action='store_true', help='Use pgsql binary json type')
-parser.add_argument('--tag', type=str, help='Tag to place in results file')
-parser.add_argument('--remote', action='store_true', help='Enable remote reporting')
-parser.add_argument('--rkey', help='Google document key')
-parser.add_argument('--start', type=str, help='Chromosome to start load from')
-parser.add_argument('--bulk', action='store_true', help='Load data from file with bulk/batch insert')
 parser.add_argument('--pgcopy', action='store_true', help='Load data from file with COPY method')
+parser.add_argument('--tag', type=str, help='Tag to place in results file')
+parser.add_argument('--path', help='Path to chromosome data')
+parser.add_argument('--start', type=str, help='Chromosome to start load from')
 parser.add_argument('--indexes', action='store_true', help='Create indexes')
 parser.add_argument('--queries', action='store_true', help='Run queries')
 args = parser.parse_args()
@@ -31,28 +26,20 @@ scriptVersion = "2.0"
 
 # Set default variables
 dev = False
-remote = False
 pgcopy = False
 createIndexes = False
 runQueries = False
 databaseName = 'snp_research'
 username = 'dev'
 password = ''
-sqlHost = '127.0.0.1'
 path = ''
 tag = ''
-docKey = ''
 start = '1'
-bulk = False
 jsonb = False
+
 # Update any present from CLI
 if args.dev: # If dev mode, only load chr 21
     dev = True
-if args.remote and args.rkey is not None: # If set to remote log and document key is present, log to GDocs
-    remote = True
-    docKey = args.rkey
-else:
-    remote = False
     
 if args.path is not None: # If set, use as root path for chromosome data
     path = args.path
@@ -62,25 +49,21 @@ if args.username is not None: # Postgres username
     username = args.username
 if args.password is not None: # Postgres password
     password = args.password
-if args.yhost is not None: # Postgres host name
-    sqlHost = args.yhost
 if args.jsonb:
     jsonb = True
+if args.pgcopy is not None:
+    pgcopy = args.pgcopy
 if args.tag is not None: # Tag to place in results file
     tag = args.tag
 if args.start is not None:
     start = args.start
-if args.pgcopy is not None:
-    pgcopy = args.pgcopy
-if args.bulk is not None:
-    bulk = args.bulk
 if args.indexes is not None:
     createIndexes = args.indexes
 if args.queries is not None:
     runQueries = args.queries
     
 # Open results file
-resultsFileName = 'results-postgres'
+resultsFileName = 'results-pgsql-json'
 if resultsFileName != "":
     resultsFileName += '-' + tag
 resultsFileName += '.txt'
@@ -88,15 +71,6 @@ resultsFile = open(resultsFileName, 'w')
 resultsFile.write(scriptVersion + '\n')
 result = Result()
 resultsFile.write(result.toHeader() + '\n')
-
-if remote:
-    gusername = raw_input("Enter Google username: ")
-    gpassword = getpass.getpass("Enter Google password: ")    
-    gs = gspread.Client(auth=(gusername,gpassword))
-    gs.login()
-    ss = gs.open_by_key(docKey)
-    ws = ss.add_worksheet(tag + "-" + str(time.time()),1,1)
-    ws.append_row(result.headerArr())
 
 # Data files
 snpFilePath = 'snpData-chr{0}.txt'
@@ -119,6 +93,7 @@ if dev is False:
         chromosomes = startList
 
 # Create Postgres database, tables if not exists
+# For initial connection, connect to user database and then create the experimental db
 postgresConnection = psycopg2.connect("dbname=" + username + " user=" + username)
 postgresConnection.autocommit = True
 createDbCursor = postgresConnection.cursor()
@@ -127,6 +102,7 @@ createDbCursor.execute("CREATE DATABASE " + databaseName)
 createDbCursor.close()
 postgresConnection.close() # Reconnect with database name
 
+# Reopen connection to the experimental database to create tables and begin inserts
 postgresConnection = psycopg2.connect("dbname=" + databaseName + " user=" + username)
 createDbCursor = postgresConnection.cursor()
 
@@ -149,6 +125,7 @@ for name, ddl in TABLES.iteritems():
     createDbCursor.execute(ddl)
     postgresConnection.commit()
 
+# Disable triggers/constraints on tables
 createDbCursor.execute("ALTER TABLE snp DISABLE trigger ALL;")
 
 createDbCursor.close()
@@ -170,8 +147,8 @@ for curChr in chromosomes:
     curLociFilePath = lociFilePath.format(curChr)
     
     if len(path) > 0:
-        curSnpFilePath = path.rstrip('\\') + '\\' + curSnpFilePath
-        curLociFilePath = path.rsplit('\\') + '\\' + curLociFilePath
+        curSnpFilePath = path.rstrip('\\').rstrip('/') + '\\' + curSnpFilePath
+        curLociFilePath = path.rstrip('\\').rstrip('/') + '\\' + curLociFilePath
     
     documents.clear()
 
@@ -218,42 +195,32 @@ for curChr in chromosomes:
 
     # Log start time for MongoDB inserts
     result.documentInsertStart = time.time()
-    batchSize = 10000
 
     if pgcopy:
         mimpfile = "/home/ec2-user/jsonchr" + str(curChr) + ".json"
+        
         print "Writing json file for copy"
+        sys.stdout.flush()
+        
         fp = open(mimpfile,'w')
         for curDoc in documents.values():
             json.dump(curDoc,fp)
             fp.write('\n')
         fp.close()
+
         print "Loading json with copy method"
+        sys.stdout.flush()
+        
         # Restart insert time
         result.documentInsertStart = time.time()
         
         cursor.execute("COPY snp (jsondata) FROM '" + mimpfile + "'")
 
         os.remove(mimpfile)
-    elif bulk:
-        print "Bulk/batch document inserting starting"
-        curChromData = []
-        for key, value in documents.iteritems():
-            curChromData.append(value)
-
-        # Insert each document with SNP and loci data
-        jsonBatchData = []
-        for i in xrange(0,len(curChromData),batchSize):
-            for j in xrange(i, i+batchSize, 1):
-                if i + j < len(curChromData):
-                    jsonBatchData.append("('" + json.dumps(curChromData[i + j]) + "')")
-                else:
-                    break
-
-            arrData = ','.join(jsonBatchData)
-            cursor.execute("insert into snp (jsondata) values " + arrData)
     else:
         print "Individual document inserting starting"
+        sys.stdout.flush()
+
         # Insert each document with SNP and loci data
         for v in documents.iteritems():
             cursor.execute("insert into snp (jsondata) values (%s)", [json.dumps(v[1])])
@@ -265,20 +232,13 @@ for curChr in chromosomes:
     # Log end time and total pgsql time
     result.documentInsertEnd = time.time()
     result.calculate()
-    sys.stdout.flush()
-
+    
     # Close pgsql cursor
     cursor.close()
 
     print result.toTerm()
     resultsFile.write(result.toString() + '\n')
-    if remote:
-        try:
-            print "Sending to GDocs..."
-            gs.login()
-            ws.append_row(result.stringArr())
-        except:
-            print "Unable to send to GDocs, continuing..."
+    sys.stdout.flush()
 
 # Create new cursor, create indexes and run test queries
 cursor = postgresConnection.cursor()    
@@ -288,47 +248,54 @@ cursor.execute("ALTER TABLE snp ENABLE trigger ALL;")
 
 if createIndexes:
     result = Result()
-    result.method = "pgsql-Idx"
+    result.method = "pgsql-jsonIdx"
     result.tag = tag
 
     rsidIndex = "CREATE INDEX idx_rsid ON snp USING GIN ((jsondata -> 'rsid'))"
     clinIndex = "CREATE INDEX idx_clin ON snp USING GIN ((jsondata -> 'has_sig'))"
     geneIndex = "CREATE INDEX idx_gene ON snp USING GIN ((jsondata -> 'loci') jsonb_path_ops)"
+    fullIndex = "CREATE INDEX idx_full ON snp USING GIN ((jsondata) jsonb_path_ops)"
     
     print "Creating RSID index..."
+    sys.stdout.flush()
     idxStart = time.time()
     cursor.execute(rsidIndex)
-    cursor.commit()
+    postgresConnection.commit()
     idxEnd = time.time()
     result.idxRsid = idxEnd - idxStart
     
     print "Creating ClinSig index..."
+    sys.stdout.flush()
     idxStart = time.time()
     cursor.execute(clinIndex)
-    cursor.commit()
+    postgresConnection.commit()
     idxEnd = time.time()
     result.idxClinSig = idxEnd - idxStart        
 
     print "Creating Gene index..."
+    sys.stdout.flush()
     idxStart = time.time()
     cursor.execute(geneIndex)
-    cursor.commit()
+    postgresConnection.commit()
     idxEnd = time.time()
     result.idxGene = idxEnd - idxStart
 
+    print "Creating full GIN index..."
+    sys.stdout.flush()
+    idxStart = time.time()
+    cursor.execute(fullIndex)
+    postgresConnection.commit()
+    idxEnd = time.time()
+    print "Full GIN Index: " + str(idxEnd-idxStart)
+
+
     resultsFile.write(result.toString() + '\n')
-    if remote:
-        try:
-            print "Sending to GDocs..."
-            gs.login()
-            ws.append_row(result.stringArr()) 
-        except:
-            print "Unable to send to GDocs, continuing..."
+    sys.stdout.flush()
        
 if runQueries:
-    for z in range(1,101):
+    for z in range(1,11):
         result = Result()
-        result.method = "pgsql-Qry" + str(z)
+        result.method = "pgsql-jsonQry" + str(z)
         result.tag = tag
         print "Running queries, count " + str(z)
         sys.stdout.flush()
@@ -354,13 +321,6 @@ if runQueries:
         result.qryByGeneSig = idxEnd - idxStart        
 
         resultsFile.write(result.toString() + '\n')
-        if remote:
-            try:
-                print "Sending to GDocs..."
-                gs.login()
-                ws.append_row(result.stringArr()) 
-            except:
-                print "Unable to send to GDocs, continuing..."
 
 # Close pgsql cursor
 cursor.close()

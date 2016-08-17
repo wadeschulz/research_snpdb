@@ -272,6 +272,7 @@ if createIndexes:
     geneIndex = "CREATE INDEX idx_gene ON locus (gene)"
     
     print "Creating RSID index..."
+    sys.stdout.flush()
     idxStart = time.time()
     cursor.execute(rsidIndex)
     postgresConnection.commit()
@@ -279,6 +280,7 @@ if createIndexes:
     result.idxRsid = idxEnd - idxStart
     
     print "Creating ClinSig index..."
+    sys.stdout.flush()
     idxStart = time.time()
     cursor.execute(clinIndex)
     postgresConnection.commit()
@@ -286,6 +288,7 @@ if createIndexes:
     result.idxClinSig = idxEnd - idxStart        
 
     print "Creating Gene index..."
+    sys.stdout.flush()
     idxStart = time.time()
     cursor.execute(geneIndex)
     postgresConnection.commit()
