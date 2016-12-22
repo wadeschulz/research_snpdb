@@ -17,3 +17,10 @@ Prerequistites:
   <li>Tab-delimited data files</li>
 </ul>
 
+presentation
+------------
+http://www.wadeschulz.com/portfolio/aclps2014/
+
+publication
+-----------
+[Schulz, W. L., Nelson, B. G., Felker, D. K., Durant, T. J. S., & Torres, R. (2016). Evaluation of relational and NoSQL database architectures to manage genomic annotations. Journal of Biomedical Informatics, 64, 288–295. http://doi.org/10.1016/j.jbi.2016.10.015](https://www.ncbi.nlm.nih.gov/pubmed/27810480)
